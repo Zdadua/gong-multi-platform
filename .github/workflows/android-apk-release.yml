@@ -1,0 +1,125 @@
+#  使用此workflow前，请先去settings/security/secrets&variables/配置secret和variables字段
+#  Secret:
+#   - ANDROID_KEYSTORE_PASSWORD 
+#   - ANDROID_KEY_ALIAS
+#   - ANDROID_KEY_PASSWORD
+#  Variables:
+#   - GONGGONG_KEY_ANDROID // 使用base64编码的Android key
+#   - SYSTEM_HOST // 拱拱的host
+#   - SYSTEM_MAX_RETRY_TIMES // 最多重试次数 (long)
+#   - SYSTEM_RETRY_INTERVAL // 重试的间隔时间 (int)
+#   - SYSTEM_UPDATE_HOST // 拱拱的更新host
+#   - SYSTEM_WEB_HOST // 拱拱的webhost
+
+name: 发布 Android APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'V*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag'
+        required: true
+        type: string
+      release_name:
+        description: 'Release title'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag_name }}
+      RELEASE_NAME: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_name }}
+      SYSTEM_HOST: ${{ vars.SYSTEM_HOST }}
+      SYSTEM_UPDATE_HOST: ${{ vars.SYSTEM_UPDATE_HOST }}
+      SYSTEM_WEB_HOST: ${{ vars.SYSTEM_WEB_HOST }}
+      SYSTEM_MAX_RETRY_TIMES: ${{ vars.SYSTEM_MAX_RETRY_TIMES }}
+      SYSTEM_RETRY_INTERVAL: ${{ vars.SYSTEM_RETRY_INTERVAL }}
+      ANDROID_KEYSTORE_BASE64: ${{ vars['gonggong_key_android'] }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Ensure gradlew executable
+        run: chmod +x gradlew
+
+      - name: Decode Android keystore
+        shell: bash
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "Missing variable: gonggong-key-android"
+            exit 1
+          fi
+
+          if [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "Missing signing secrets: ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD"
+            exit 1
+          fi
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/android-signing-key.jks"
+          echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/android-signing-key.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        run: ./gradlew :composeApp:assembleRelease --stacktrace
+
+      - name: Locate APK
+        id: apk
+        shell: bash
+        run: |
+          APK_DIR="composeApp/build/outputs/apk/release"
+
+          if [ ! -d "$APK_DIR" ]; then
+            echo "Release APK directory not found: $APK_DIR"
+            exit 1
+          fi
+
+          mapfile -t APK_LIST < <(find "$APK_DIR" -maxdepth 1 -type f -name "*.apk" | sort)
+          if [ ${#APK_LIST[@]} -eq 0 ]; then
+            echo "No APK found under $APK_DIR"
+            exit 1
+          fi
+
+          echo "Found APK candidates:"
+          ls -lh "$APK_DIR"/*.apk
+
+          # Prefer the largest apk to avoid accidentally picking split/minimal variants.
+          APK_PATH="$(ls -S "$APK_DIR"/*.apk | head -n 1)"
+
+          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk-${{ env.RELEASE_TAG }}
+          path: ${{ steps.apk.outputs.apk_path }}
+
+      - name: Create GitHub Release and upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME != '' && env.RELEASE_NAME || format('Android {0}', env.RELEASE_TAG) }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: ${{ steps.apk.outputs.apk_path }}

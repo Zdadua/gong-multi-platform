@@ -15,7 +15,6 @@ import io.ktor.client.request.HttpSendPipeline
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.URLProtocol
-import io.ktor.http.contentType
 import io.ktor.http.encodedPath
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
@@ -47,7 +46,7 @@ object HttpClientProvider {
                     }
 
                     sendWithoutRequest { request ->
-                        request.url.encodedPath == "/login"
+                        request.url.encodedPath != "/login"
                     }
                 }
             }
@@ -57,7 +56,6 @@ object HttpClientProvider {
                     protocol = URLProtocol.Companion.HTTP
                     host = SystemGlobalConfig.HOST
                 }
-                contentType(ContentType.Application.Json)
             }
         }.apply {
             sendPipeline.intercept(HttpSendPipeline.Monitoring) {

@@ -31,6 +31,7 @@ class AuthRepositoryImpl(
                 HttpStatusCode.Conflict,
                 HttpStatusCode.ServiceUnavailable,
                 HttpStatusCode.GatewayTimeout,
+                HttpStatusCode.Forbidden,
                 HttpStatusCode.Unauthorized ->
                     NetworkResult.Error(
                         code = code,

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 val authMsgMap = mapOf(
     HttpStatusCode.Unauthorized to "账号或密码错误",
+    HttpStatusCode.Forbidden to "请求被拒绝(403)，请检查请求格式或鉴权策略",
     HttpStatusCode.Conflict to "账号未初始化",
     HttpStatusCode.ServiceUnavailable to "教务系统超时",
     HttpStatusCode.GatewayTimeout to "请求超时",
